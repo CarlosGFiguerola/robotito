@@ -15,6 +15,6 @@ every kind of data.
 - need, at less, one URL as starting point (*seed*). 
 - admit a number of parameters in order to set rules delimiting web pages to explore, set max of pages to explore, etc.
 - most of those parameters can be setted in a config file
-So, the mos basic usage is:
+So, the most basic usage is:
 
 `python3 robotito.py -c config_file`
