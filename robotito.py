@@ -1,9 +1,8 @@
 '''
-pre-crawler
+crawler
 this is a simplistic crwaler, just for
 testing procedures and data structures
-
-versión OO
+can work with Tor services, also
 '''
 import re
 import os
@@ -40,6 +39,9 @@ class crawler:
 
 		self.cyberrulesYES=[]
 		self.cyberrulesNOT=[] 
+		# proxy parameters (in case of navigating ToR, foe exp
+		self.proxyhost=''
+		self.proxyport=None
 	
 		# mode of exploring: queue, stack, top value
 		self.mode='queue'
@@ -47,8 +49,15 @@ class crawler:
 		self.max_nodes=50000
 		self.max_list_size=10000
 		self.cyberfile=''
-		self.seedsfile=''
+		self.seed=''
 		self.configfile=''
+		self.proxy={}
+		self.useragent='robotito'
+		# running session: fresh or resume mode
+		self.session_mode='fresh'
+		# keep data for resume session later
+		self.session_visited_file='robotito_visited'
+		self.session_tovisit_file='robotito_tovisit'
 
 	# -- procs	
 	def visit(self,url):
@@ -56,8 +65,11 @@ class crawler:
 		downloads a single URL
 		returns status code and URL content
 		'''
+		session=requests.session()
+		if len(self.proxy.keys()) > 0:
+			session.proxies=self.proxy
 		try:
-			x=requests.get(url)
+			x=session.get(url,headers= {'User-Agent':self.useragent})
 		except:
 			self.visited[url]=True
 			return(0,'')
@@ -65,6 +77,13 @@ class crawler:
 		# to re-try later ??
 		# by the moment, we forget this
 		self.visited[url]=True
+
+		# save visited URL for resume session later
+		F=open(self.session_visited_file,'a')
+		F.write(url)
+		F.write('\n')
+		F.close()
+
 		return x.status_code, x.text
 	
 	def scan(self, content, url_base, level):
@@ -85,16 +104,19 @@ class crawler:
 		# absolutizing and normalizing links, avoinding duplicates
 		uniq_links={}
 		for link in links:
-			link=urljoin(url_base,link)
-			link=urldefrag(link)[0]
-			# sorting query parameters, if any
-			parts=link.split('?')
-			if len(parts)==2:
-				query=sorted(parts[1].split('&'))
-				norm_query=quote('&'.join(query))
-				link=parts[0]+'?'+norm_query
-			# add to dict of unique links
-			uniq_links[link]=True
+			try:
+				link=urljoin(url_base,link)
+				link=urldefrag(link)[0]
+				# sorting query parameters, if any
+				parts=link.split('?')
+				if len(parts)==2:
+					query=sorted(parts[1].split('&'))
+					norm_query=quote('&'.join(query))
+					link=parts[0]+'?'+norm_query
+				# add to dict of unique links
+				uniq_links[link]=True
+			except:
+				continue
 		# return the list of unique links
 		return [(l, level+1) for l in uniq_links.keys()]
 	
@@ -200,10 +222,14 @@ class crawler:
 				self.max_level=int(value)
 			elif parameter=='max_nodes':
 				self.max_nodes=int(value)
+			elif parameter=='proxyhost':
+				self.proxyhost=value
+			elif parameter=='proxyport':
+				self.proxyport=value
 			elif parameter=='max_list_size':
 				self.max_list_size=int(value)
-			elif parameter=='seedsfile':
-				self.seedsfile=value
+			elif parameter=='seed':
+				self.seed=value
 			elif parameter=='cyberfile':
 				self.cyberfile=value
 			elif parameter=='mode':
@@ -224,26 +250,35 @@ class crawler:
 					self.cyberrulesNOT.append(re.compile(part2))
 			
 		F.close()
+		# setting proxy, if any
+		if self.proxyhost !='' and self.proxyport !=None:
+			self.proxy={}
+			self.proxy['http']= 'socks5h://'+self.proxyhost+':'+self.proxyport
+			self.proxy['https']= 'socks5h://'+self.proxyhost+':'+self.proxyport
 		
 		
-	def inject_seeds(self,seed):
+	def inject_seeds(self):
 		# if single seed, add it to main list
 		# else, take seeds from file
-		if seed !='':
-			self.to_visit[seed]=(self.rank,0)
-			self.rank=self.rank+1 # ??? better with an specific function for ranking
-		else:
+		if X.seed=='':
+			return
+		if os.path.isfile(self.seed):
 			# take seeds from file
 			try:
-				F=open(self.seedsfile,'r')
+				F=open(self.seed,'r')
 				s=[s.strip('\n') for s in F.readlines() if s !='\n']
 				F.close()
 			except:
 				print('Error with seeds file')
 				return
 			for seed in s:
-				to_visit[seed]=(self.rank,0)
+				self.to_visit[seed]=(self.rank,0)
 				self.rank=self.rank+1 # ??? better with an specific function for ranking
+		else:
+				self.to_visit[self.seed]=(self.rank,0)
+				self.rank=self.rank+1 # ??? better with an specific function for ranking				
+				
+		return
 	
 	def cybermetrics(self, sourcelink,links):
 		# save links from visited page, to perform SNA later
@@ -255,25 +290,25 @@ class crawler:
 			F=open(self.cyberfile,'a')
 			for link, level in links:
 				if self.cyber_link_filter(link):
-					F.write(str(sourcelink)+' '+str(link)+'\n')
+					F.write(quote(sourcelink)+' '+quote(link)+'\n')
 			F.close()
 		except:
 			print('ERROR with cyberfile')
 			return
 		
 		
-	def crawl(self,seed='', max_level=5):
+	def crawl(self):
 		signal.signal(signal.SIGINT, signal_handler)
 		# doing a full crawl
 	
 		# injecting seeds
-		self.inject_seeds(seed)
+		self.inject_seeds()
 		
 		#--- loop
 		while len(self.to_visit.keys()) > 0:
 			this=self.following() # this is a tuple(URL, level)
 			status, content=self.visit(this[0])
-			print(this[0], this[1], status, len(self.to_visit.keys()))
+			print(this[0], this[1], status, len(self.to_visit.keys()), self.max_level)
 			if status !=200:
 				continue
 			# add to visited URLS
@@ -293,21 +328,36 @@ class crawler:
 				if link in self.to_visit:
 					if self.mode=='freq':
 						f,l=self.to_visit[link]
-						self.to_visit[link]=(f+1,l)
+						f=f+1
+						self.to_visit[link]=(f,l)
+						# keep in session file
+						F=open(self.session_tovisit_file,'a')
+						F.write(link+'|'+str(f)+'|'+str(l)+'\n')
+						F.close()
 					# as already in to_visit, it passed filters
 					continue
 				if self.link_filter(link, level):
+					# check max _list_size
+					if len(self.to_visit.keys()) > self.max_list_size:
+						continue
+						# just don't add link to list to be visited
+						# but keep on crawling
 					if self.mode=='queue' or self.mode=='stack':
 						self.to_visit[link]=(self.rank, level)
+						# keep in session file
+						F=open(self.session_tovisit_file,'a')
+						F.write(link+'|'+str(self.rank)+'|'+str(level)+'\n')
+						F.close()
 					elif self.mode=='freq': # as not in to_visit, frequency=1
 						self.to_visit[link]=(1,level)
+						
+						# keep in session file
+						F=open(self.session_tovisit_file,'a')
+						F.write(link+'|'+'1'+'|'+str(level)+'\n')
+						F.close()
 					
-					# check max_list_size
-					if len(self.to_visit.keys()) > self.max_list_size:
-						print('Reache Max waiting nodes')
-						exit(88)
 					self.rank=self.rank+1
-			
+		print('Crawl done')
 
 	def pparameters(self):
 		# print all config parameters
@@ -315,7 +365,7 @@ class crawler:
 		print('max_level', self.max_level)
 		print('max_nodes', self.max_nodes)
 		print('max_list_size', self.max_list_size)
-		print('seedsfile', self.seedsfile)
+		print('seed', self.seed)
 		print('cyberfile',self.cyberfile)
 		print('mode',self.mode)
 		for ruleY in self.rulesYES:
@@ -343,45 +393,88 @@ def signal_handler(signal, frame):
     proceso=os.getpid()
     os.system('kill -9 '+str(proceso))
 
+def reset_session_files():
+	try:
+		F=open(X.session_visited_file,'w')
+		F.close()
+		F=open(X.session_tovisit_file,'w')
+		F.close()
+		return(True)
+	except:
+		return(False)
+
+def load_session_files():
+	# assume running in resume mode
+	# check if file exist
+	if os.path.isfile(X.session_visited_file) and os.path.isfile(X.session_tovisit_file):
+		# load visited file
+		F=open(X.session_visited_file,'r')
+		visited=[i.strip('\n') for i in F.readlines() if i !='\n']
+		F.close()
+		# add visited to dict X.visited
+		for i in visited:
+			X.visited[i]=True
+
+		# load tovisit file
+		F=open(X.session_tovisit_file,'r')
+		for line in F:
+			line=line.strip('\n').split('|')
+			if len(line) !=3:
+				print('Error in session file', X.session_tovisit_file)
+				exit(88)
+			if line[0] in X.to_visit:
+				if int(line[1]) > X.to_visit[line[0]][0]:
+					X.to_visit[line[0]]=(int(line[1]), int(line[2]))
+			else:
+				X.to_visit[line[0]]=(int(line[1]), int(line[2]))
+		F.close()
+		return(True)
+	else:
+		print('Session file(s) does\'nt exists')
+		return(False)
+
+
+
+
+
 #--------------   -------------------
 # instantiate class
 X=crawler()
-
 # some initial values
 configfile=''
-cyberfile=''
-max_level=2
-seed=''
+Bcyberfile=''
+Bmax_level=None
+Bseed=''
 print_parameters=False
-
+resume=False
 # reads in arguments
 for e in range(1, len(argv)):
 	try:
 		if argv[e]=='-c':
-			X.configfile=argv[e+1]
+			configfile=argv[e+1]
 		elif argv[e]=='-o':
-			cyberfile=argv[e+1]			
+			Bcyberfile=argv[e+1]			
 		elif argv[e]=='-l':
-			max_level=int(argv[e+1])
-			pass
+			Bmax_level=int(argv[e+1])
 		elif argv[e]=='-s':
-			seed=argv[e+1]
+			Bseed=argv[e+1]
 		elif argv[e]=='-p':
 			print_parameters=True
+		elif argv[e]=='-resume':
+			resume=True
 	except:
 		print('Error in arguments')
 		exit(88)
 		
 # first, configure		
-X.configure(X.configfile)
+X.configure(configfile)
 if len(X.rulesYES)==0:
 	# if there aren't positive rules at all
 	# we visit any link
 	X.rulesYES.append(re.compile('.*'))
 
 # overwriting parameters
-if cyberfile!='':
-	X.cyberfile=cyberfile
+X.cyberfile=Bcyberfile
 # better overwrite cyberfile, if exists
 if X.cyberfile !='':
 	try:
@@ -391,13 +484,31 @@ if X.cyberfile !='':
 		print('Bad cyberfile', X.cyberfile)
 		exit(88)
 
-if X.max_level !=0:
-	X.max_level=max_level
+if Bmax_level !=None:
+	X.max_level=Bmax_level
+if Bseed !='':
+	X.seed=Bseed
+if resume:
+	X.session_mode='resume'
 
 if print_parameters:
 	X.pparameters()
+#######################################################
+# session files
+# check if they are
+# if yes, if robotito running in resume session mode
+#	load session files
+#	(session files remain during the whole session)
+# else reset session files
+# reset session files, if any
+if X.session_mode=='resume':
+	# load session files, if they are
+	if not load_session_files():
+		print('Error: could\'nt load session files')
+		exit(88)
+elif X.session_mode=='fresh':
+	reset_session_files()
 
 # proceed
-X.crawl(seed=seed, max_level=max_level)
-
+X.crawl()
 
