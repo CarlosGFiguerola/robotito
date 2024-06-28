@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+  - family-names: Figuerola
+    given-names: Carlos G.
+title: "robotito. A light crawler"
+version: 2.0
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.1234
+date-released: 2024-01-06
+url: https://github.com/CarlosGFiguerola/robotito
+
